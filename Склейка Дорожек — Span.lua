@@ -1,0 +1,478 @@
+-- Diagnostic functions
+function checkSend(sourceTrack, sendIdx)
+    local _, sourceName = reaper.GetTrackName(sourceTrack)
+    local destTrack = reaper.GetTrackSendInfo_Value(sourceTrack, 0, sendIdx, "P_DESTTRACK")
+    local _, destName = reaper.GetTrackName(destTrack)
+    
+    local sendMode = reaper.GetTrackSendInfo_Value(sourceTrack, 0, sendIdx, "I_SENDMODE")
+    local sendVol = reaper.GetTrackSendInfo_Value(sourceTrack, 0, sendIdx, "D_VOL")
+    local sendVolDB = 20 * math.log(sendVol, 10)
+    
+    reaper.ShowConsoleMsg(string.format("\nПроверка send: %s -> %s\n", sourceName, destName))
+    reaper.ShowConsoleMsg(string.format("Режим send: %s\n", 
+        sendMode == 0 and "Post-Fader (OK)" or "WARNING: Не Post-Fader!"))
+    reaper.ShowConsoleMsg(string.format("Громкость send: %.1f dB\n", sendVolDB))
+    
+    return sendMode == 0
+end
+
+function checkTrackSignalFlow(track)
+    local _, name = reaper.GetTrackName(track)
+    local volume = reaper.GetMediaTrackInfo_Value(track, "D_VOL")
+    local volumeDB = 20 * math.log(volume, 10)
+    local pan = reaper.GetMediaTrackInfo_Value(track, "D_PAN")
+    local mute = reaper.GetMediaTrackInfo_Value(track, "B_MUTE")
+    local phase = reaper.GetMediaTrackInfo_Value(track, "B_PHASE")
+    
+    reaper.ShowConsoleMsg(string.format("\n=== Проверка трека: %s ===\n", name))
+    reaper.ShowConsoleMsg(string.format("Громкость: %.1f dB\n", volumeDB))
+    reaper.ShowConsoleMsg(string.format("Панорама: %.0f%%\n", pan * 100))
+    reaper.ShowConsoleMsg(string.format("Мьют: %s\n", mute == 1 and "ДА (WARNING!)" or "нет"))
+    reaper.ShowConsoleMsg(string.format("Фаза: %s\n", phase == 1 and "Инвертирована (WARNING!)" or "норма"))
+    
+    local fxCount = reaper.TrackFX_GetCount(track)
+    reaper.ShowConsoleMsg(string.format("Количество FX: %d\n", fxCount))
+    
+    local fxEnabled = reaper.GetMediaTrackInfo_Value(track, "I_FXEN")
+    reaper.ShowConsoleMsg(string.format("FX цепь: %s\n", fxEnabled == 1 and "включена" or "ВЫКЛЮЧЕНА (WARNING!)"))
+    
+    local numSends = reaper.GetTrackNumSends(track, 0)
+    for i = 0, numSends - 1 do
+        checkSend(track, i)
+    end
+    
+    return not (mute == 1 or phase == 1 or fxEnabled == 0)
+end
+
+function getTrackColor(trackType)
+    local colors = {
+        source = {
+            {242, 153, 74},   -- Оранжевый
+            {235, 87, 87},    -- Красный
+            {47, 128, 237},   -- Синий
+            {39, 174, 96}     -- Зеленый
+        },
+        bus = {
+            {111, 168, 220},  -- Светло-синий
+            {147, 196, 125},  -- Светло-зеленый
+            {246, 178, 107},  -- Светло-оранжевый
+            {184, 153, 218}   -- Светло-фиолетовый
+        },
+        master = {
+            {155, 81, 224},   -- Фиолетовый
+            {123, 97, 255},   -- Индиго
+            {58, 134, 255}    -- Голубой
+        }
+    }
+    
+    local color
+    if trackType == "source" then
+        color = colors.source[math.random(1, #colors.source)]
+    elseif trackType == "bus" then
+        color = colors.bus[math.random(1, #colors.bus)]
+    else
+        color = colors.master[math.random(1, #colors.master)]
+    end
+    
+    return reaper.ColorToNative(color[1], color[2], color[3])
+end
+
+function colorizeTrack(track, name)
+    local trackType = "source"
+    
+    if string.find(name, "bus") or string.find(name, "Bus") then
+        trackType = "bus"
+    elseif name == "master" or name == "analog_master" or name == "mfit" then
+        trackType = "master"
+    end
+    
+    reaper.SetTrackColor(track, getTrackColor(trackType))
+end
+
+function diagnoseMixRouting(tracks)
+    reaper.ShowConsoleMsg("\n====== ДИАГНОСТИКА МАРШРУТИЗАЦИИ ======\n")
+    
+    local allOK = true
+    
+    for name, number in pairs(tracks) do
+        local track = reaper.GetTrack(0, number - 1)
+        if track then
+            if not checkTrackSignalFlow(track) then
+                allOK = false
+            end
+        else
+            reaper.ShowConsoleMsg(string.format("\nОШИБКА: Трек %s (#%d) не найден!\n", 
+                name, number))
+            allOK = false
+        end
+    end
+    
+    reaper.ShowConsoleMsg("\n====== ИТОГ ДИАГНОСТИКИ ======\n")
+    if allOK then
+        reaper.ShowConsoleMsg("Все проверки пройдены успешно!\n")
+    else
+        reaper.ShowConsoleMsg("ВНИМАНИЕ: Обнаружены проблемы в маршрутизации!\n")
+        reaper.ShowMessageBox(
+            "В маршрутизации обнаружены проблемы. Проверьте консоль REAPER для деталей.", 
+            "Результат диагностики", 
+            0)
+    end
+    
+    return allOK
+end
+
+-- Function to check if FX is available
+function isFXAvailable(fxName)
+    local track = reaper.GetTrack(0, 0)
+    if not track then return false end
+    
+    local fxIndex = reaper.TrackFX_AddByName(track, fxName, false, -1)
+    if fxIndex >= 0 then
+        reaper.TrackFX_Delete(track, fxIndex)
+        return true
+    end
+    return false
+end
+
+-- Function to add FX to track if available
+function addFXToTrack(track, fxName)
+    if isFXAvailable(fxName) then
+        local fxIndex = reaper.TrackFX_AddByName(track, fxName, false, -1)
+        if fxIndex >= 0 then
+            reaper.ShowConsoleMsg(string.format("Добавлен FX: %s\n", fxName))
+            return true
+        end
+    end
+    reaper.ShowConsoleMsg(string.format("ПРЕДУПРЕЖДЕНИЕ: FX не найден: %s\n", fxName))
+    return false
+end
+
+-- Add monitoring function
+function setupMonitoring(track, position)
+    local _, name = reaper.GetTrackName(track)
+    reaper.ShowConsoleMsg(string.format("\nНастройка мониторинга для %s (%s)...\n", name, position))
+    
+    -- Сначала удалим все существующие SPAN Plus
+    local fxCount = reaper.TrackFX_GetCount(track)
+    for i = fxCount - 1, 0, -1 do
+        local retval, buf = reaper.TrackFX_GetFXName(track, i, "")
+        if buf:find("SPAN Plus") then
+            reaper.TrackFX_Delete(track, i)
+        end
+    end
+    
+    -- Добавляем один SPAN Plus
+    if addFXToTrack(track, "SPAN Plus") then
+        local fxCount = reaper.TrackFX_GetCount(track)
+        local spanIndex = fxCount - 1
+        
+        -- Настраиваем SPAN Plus для мониторинга
+        reaper.TrackFX_SetEnabled(track, spanIndex, false)
+        reaper.ShowConsoleMsg("SPAN Plus добавлен и настроен в bypassed режиме\n")
+    end
+end
+
+
+-- Enhanced group bus processing with monitoring
+function setupGroupBusProcessing(groupTrack)
+    reaper.ShowConsoleMsg("\n=== Настройка групповой обработки ===\n")
+    
+    local fxCount = reaper.TrackFX_GetCount(groupTrack)
+    for i = fxCount - 1, 0, -1 do
+        reaper.TrackFX_Delete(groupTrack, i)
+    end
+    
+    setupMonitoring(groupTrack, "pre-processing")
+    
+    local fxChain = {
+        "SSL Native Bus Compressor 2",
+        "Pro-Q 3",
+        "J37 Stereo"
+    }
+    
+    for i, fxName in ipairs(fxChain) do
+        if addFXToTrack(groupTrack, fxName) then
+            reaper.TrackFX_SetEnabled(groupTrack, i, true)
+            reaper.ShowConsoleMsg(string.format("Добавлен и включен FX: %s\n", fxName))
+        end
+    end
+    
+    -- Устанавливаем уровень группы немного ниже для предотвращения клиппинга
+    reaper.SetMediaTrackInfo_Value(groupTrack, "D_VOL", math.exp(-3 * 0.11512925464970229))
+    
+    setupMonitoring(groupTrack, "post-processing")
+    
+    reaper.SetMediaTrackInfo_Value(groupTrack, "I_FXEN", 1)
+    reaper.SetMediaTrackInfo_Value(groupTrack, "B_MUTE", 0)
+    
+    reaper.ShowConsoleMsg("Групповая обработка настроена\n")
+end
+
+
+
+function getRandomColor()
+    local r = math.random(60, 240)
+    local g = math.random(60, 240)
+    local b = math.random(60, 240)
+    return reaper.ColorToNative(r, g, b)
+end
+
+function getTrackName(track)
+    local _, name = reaper.GetTrackName(track)
+    return name
+end
+
+function getTrackByNumber(number)
+    local track = reaper.GetTrack(0, number - 1)
+    if track then
+        reaper.ShowConsoleMsg(string.format("Найден трек %d: %s\n", number, getTrackName(track)))
+    else
+        reaper.ShowConsoleMsg(string.format("Трек %d не найден!\n", number))
+    end
+    return track
+end
+
+function createSend(sourceTrack, destTrack, sendVolDB)
+    local sourceName = getTrackName(sourceTrack)
+    local destName = getTrackName(destTrack)
+    
+    -- Проверяем существующие sends
+    local numSends = reaper.GetTrackNumSends(sourceTrack, 0)
+    for i = 0, numSends - 1 do
+        local destTrackExisting = reaper.GetTrackSendInfo_Value(sourceTrack, 0, i, "P_DESTTRACK")
+        if destTrackExisting == destTrack then
+            reaper.ShowConsoleMsg(string.format("Send уже существует: %s -> %s\n", 
+                sourceName, destName))
+            return
+        end
+    end
+    
+    local sendIdx = reaper.CreateTrackSend(sourceTrack, destTrack)
+    local vol = math.exp(sendVolDB * 0.11512925464970229)
+    reaper.SetTrackSendInfo_Value(sourceTrack, 0, sendIdx, "D_VOL", vol)
+    reaper.SetTrackSendInfo_Value(sourceTrack, 0, sendIdx, "I_SENDMODE", 0)
+    
+    -- Добавляем безопасный гейн стейджинг
+    if destName == "analog_master" then
+        -- Уменьшаем уровень перед analog_master для предотвращения клиппинга
+        reaper.SetTrackSendInfo_Value(sourceTrack, 0, sendIdx, "D_VOL", math.exp(-6 * 0.11512925464970229))
+    end
+    
+    if destName == "mfit" then
+        -- Уменьшаем уровень перед лимитером
+        reaper.SetTrackSendInfo_Value(sourceTrack, 0, sendIdx, "D_VOL", math.exp(-3 * 0.11512925464970229))
+    end
+    
+    reaper.SetMediaTrackInfo_Value(sourceTrack, "B_MUTE", 0)
+    reaper.SetMediaTrackInfo_Value(destTrack, "B_MUTE", 0)
+    
+    reaper.ShowConsoleMsg(string.format("Создан send: %s -> %s (%.1f dB)\n", 
+        sourceName, destName, sendVolDB))
+end
+
+
+function createRoutingStructure()
+    local tracks = {
+        violin = 8,
+        bass = 9,
+        timpani = 7,
+        drums = 10,
+        piano_bus = 2,
+        bass_bus = 3,
+        arp_bus = 4,
+        drums_bus = 11,
+        groups = 1,
+        analog_master = 5,
+        mfit = 6,
+        master = 12
+    }
+    
+    local trackRefs = {}
+    for name, number in pairs(tracks) do
+        trackRefs[name] = getTrackByNumber(number)
+        if not trackRefs[name] then
+            return false, tracks
+        end
+        
+        colorizeTrack(trackRefs[name], name)
+        reaper.SetMediaTrackInfo_Value(trackRefs[name], "B_MUTE", 0)
+        reaper.SetMediaTrackInfo_Value(trackRefs[name], "D_VOL", 1.0)
+        
+        local numSends = reaper.GetTrackNumSends(trackRefs[name], 0)
+        for i = numSends - 1, 0, -1 do
+            reaper.RemoveTrackSend(trackRefs[name], 0, i)
+        end
+    end
+    
+    reaper.ShowConsoleMsg("\nСоздание маршрутизации...\n")
+    
+    -- Setup monitoring points
+    setupMonitoring(trackRefs.piano_bus, "bus")
+    setupMonitoring(trackRefs.bass_bus, "bus")
+    setupMonitoring(trackRefs.arp_bus, "bus")
+    setupMonitoring(trackRefs.drums_bus, "bus")
+    setupMonitoring(trackRefs.groups, "pre-master")
+    setupMonitoring(trackRefs.analog_master, "pre-limiting")
+    setupMonitoring(trackRefs.master, "final-output")
+    
+    -- Source to bus routing
+    createSend(trackRefs.violin, trackRefs.piano_bus, 0)
+    createSend(trackRefs.bass, trackRefs.bass_bus, 0)
+    createSend(trackRefs.timpani, trackRefs.arp_bus, 0)
+    createSend(trackRefs.drums, trackRefs.drums_bus, 0)
+    
+    -- Bus to groups routing
+    createSend(trackRefs.piano_bus, trackRefs.groups, 0)
+    createSend(trackRefs.bass_bus, trackRefs.groups, 0)
+    createSend(trackRefs.arp_bus, trackRefs.groups, 0)
+    createSend(trackRefs.drums_bus, trackRefs.groups, 0)
+    
+    -- Master chain routing
+    createSend(trackRefs.groups, trackRefs.analog_master, 0)
+    createSend(trackRefs.analog_master, trackRefs.mfit, 0)
+    createSend(trackRefs.mfit, trackRefs.master, -16)
+    
+    -- Configure MainSend routing
+    local busses = {
+        trackRefs.piano_bus,
+        trackRefs.bass_bus,
+        trackRefs.arp_bus,
+        trackRefs.drums_bus,
+        trackRefs.groups,
+        trackRefs.analog_master,
+        trackRefs.mfit
+    }
+    
+    for _, bus in ipairs(busses) do
+        reaper.SetMediaTrackInfo_Value(bus, "B_MAINSEND", 0)
+    end
+    
+    reaper.SetMediaTrackInfo_Value(trackRefs.violin, "B_MAINSEND", 1)
+    reaper.SetMediaTrackInfo_Value(trackRefs.bass, "B_MAINSEND", 1)
+    reaper.SetMediaTrackInfo_Value(trackRefs.timpani, "B_MAINSEND", 1)
+    reaper.SetMediaTrackInfo_Value(trackRefs.drums, "B_MAINSEND", 1)
+    reaper.SetMediaTrackInfo_Value(trackRefs.master, "B_MAINSEND", 1)
+    
+    -- Setup special processing for groups bus
+    setupGroupBusProcessing(trackRefs.groups)
+    
+    return true, tracks
+end
+
+function removeDuplicateSends(sourceTrack)
+    local sends = {}
+    local numSends = reaper.GetTrackNumSends(sourceTrack, 0)
+    
+    for i = numSends - 1, 0, -1 do
+        local destTrack = reaper.GetTrackSendInfo_Value(sourceTrack, 0, i, "P_DESTTRACK")
+        if sends[destTrack] then
+            reaper.RemoveTrackSend(sourceTrack, 0, i)
+        else
+            sends[destTrack] = true
+        end
+    end
+end
+
+function unmuteCriticalBuses(trackRefs)
+    local criticalBuses = {
+        trackRefs.drums_bus,
+        trackRefs.groups,
+        trackRefs.analog_master,
+        trackRefs.mfit,
+        trackRefs.master
+    }
+    
+    for _, bus in ipairs(criticalBuses) do
+        if bus then
+            reaper.SetMediaTrackInfo_Value(bus, "B_MUTE", 0)
+        end
+    end
+end
+
+function verifyInitialState()
+    if reaper.GetProjectName(0, "") == "" then
+        reaper.ShowMessageBox(
+            "No project is open. Please open a project first.", 
+            "Error", 
+            0)
+        return false
+    end
+    
+    if reaper.CountTracks(0) < 12 then
+        reaper.ShowMessageBox(
+            "Project needs at least 12 tracks. Please create required tracks first.", 
+            "Error", 
+            0)
+        return false
+    end
+    
+    return true
+end
+
+function main()
+    if not verifyInitialState() then
+        return
+    end
+
+    math.randomseed(os.time())
+    
+    reaper.ShowConsoleMsg("=== Начало выполнения скрипта ===\n")
+    
+    local reset = reaper.ShowMessageBox(
+        "Сбросить цвета треков перед созданием маршрутизации?", 
+        "Сброс цветов", 
+        4)
+    
+    if reset == 6 then
+        local trackCount = reaper.CountTracks(0)
+        for i = 0, trackCount - 1 do
+            local track = reaper.GetTrack(0, i)
+            reaper.SetTrackColor(track, 0)
+        end
+        reaper.ShowConsoleMsg("Цвета треков сброшены\n")
+    end
+    
+    local success, tracks = createRoutingStructure()
+    if not success then
+        reaper.ShowConsoleMsg("\nОШИБКА: Не все треки найдены!\n")
+        reaper.ShowMessageBox(
+            "Один или несколько треков не найдены. Проверьте номера треков.", 
+            "Ошибка", 
+            0)
+        return
+    end
+    
+    local trackRefs = {}
+    for name, number in pairs(tracks) do
+        trackRefs[name] = reaper.GetTrack(0, number - 1)
+    end
+    
+    reaper.ShowConsoleMsg("\nУдаление дублирующихся send...\n")
+    for name, track in pairs(trackRefs) do
+        if track then
+            removeDuplicateSends(track)
+            reaper.ShowConsoleMsg(string.format("Очищены дубликаты send для: %s\n", name))
+        end
+    end
+    
+    unmuteCriticalBuses(trackRefs)
+    
+    reaper.TrackList_AdjustWindows(false)
+    reaper.UpdateArrange()
+    
+    local diagnosticResult = diagnoseMixRouting(tracks)
+    
+    if diagnosticResult then
+        reaper.ShowMessageBox(
+            "Маршрутизация успешно создана и настроена с мониторингом SPAN Plus.", 
+            "Успех", 
+            0)
+    end
+    
+    reaper.ShowConsoleMsg("=== Завершение выполнения скрипта ===\n")
+end
+
+-- Execute the script
+reaper.Undo_BeginBlock()
+main()
+reaper.Undo_EndBlock("Create Mix Routing Structure with Monitoring", -1)
