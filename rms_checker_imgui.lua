@@ -9,6 +9,7 @@ local meterLength = 30 -- Length of the meter
 local isRunning = false -- Controls whether the monitoring is active
 local isPaused = false -- Controls whether monitoring is paused
 local logData = {} -- Store peak and RMS logs for display
+local hotPeakData = {} -- Store tracks with high peaks
 
 -- Function to format seconds into HH:MM:SS
 local function formatTime(seconds)
@@ -44,6 +45,7 @@ end
 -- Function to log data
 local function logTrackData()
     logData = {} -- Clear previous logs if not paused
+    hotPeakData = {} -- Clear hot peak data
     local numTracks = reaper.CountTracks(0)
     for i = 0, numTracks - 1 do
         local track = reaper.GetTrack(0, i)
@@ -55,7 +57,15 @@ local function logTrackData()
         -- Warnings
         local warning = ""
         if rmsDB > -18 then warning = warning .. " [HOT RMS]" end
-        if peakDB > -6 then warning = warning .. " [HOT PEAK]" end
+        if peakDB > -6 then
+            warning = warning .. " [HOT PEAK]"
+            table.insert(hotPeakData, {
+                trackNumber = trackNumber,
+                trackName = trackName,
+                peakDB = peakDB,
+                suggestion = "Lower the track gain or apply a limiter"
+            })
+        end
 
         -- Save to log
         table.insert(logData, {
@@ -70,12 +80,19 @@ local function logTrackData()
     end
 end
 
+-- Sort hot peak tracks by peak level
+local function sortHotPeaks()
+    table.sort(hotPeakData, function(a, b)
+        return a.peakDB > b.peakDB
+    end)
+end
+
 -- Main script function
 local function main()
     -- Variable to track if the window is open
     local isOpen = true
 
-    ImGui.SetNextWindowSize(ctx, 600, 600, ImGui.Cond_FirstUseEver)
+    ImGui.SetNextWindowSize(ctx, 600, 800, ImGui.Cond_FirstUseEver)
     isOpen, _ = ImGui.Begin(ctx, "RMS Levels Monitor", true)
     if isOpen then
         -- Buttons
@@ -83,6 +100,7 @@ local function main()
             isRunning = true
             isPaused = false
             logData = {} -- Clear logs on start
+            hotPeakData = {} -- Clear hot peak data
         end
         ImGui.SameLine(ctx)
         if ImGui.Button(ctx, "Pause") then
@@ -110,19 +128,10 @@ local function main()
             ImGui.Text(ctx, "Status: Stopped")
         end
 
-        -- Get playback position and format it as time
-        local playPosition = reaper.GetPlayPosition()
-        local formattedTime = formatTime(playPosition)
-
-        -- Display timeline
-        ImGui.Text(ctx, string.format("Timeline: %s (Current Position)", formattedTime))
-        local projectLength = reaper.GetProjectLength()
-        local progress = playPosition / projectLength
-        ImGui.ProgressBar(ctx, progress, 1.0, 20)
-
         -- Log data if running and not paused
         if isRunning and not isPaused then
             logTrackData()
+            sortHotPeaks()
         end
 
         -- Display logs
@@ -133,6 +142,17 @@ local function main()
                 ImGui.Text(ctx, string.format("Track %d: %s", log.trackNumber, log.trackName))
                 ImGui.Text(ctx, string.format("RMS: %.1f dB | Peak: %.1f dB | CF: %.1f dB%s", log.rmsDB, log.peakDB, log.crestFactor, log.warning))
                 ImGui.Text(ctx, log.meter)
+                ImGui.Separator(ctx)
+            end
+        end
+
+        -- Display hot peak rating
+        if #hotPeakData > 0 then
+            ImGui.Separator(ctx)
+            ImGui.Text(ctx, "Hot Peak Tracks (Sorted by Peak Level):")
+            for i, peak in ipairs(hotPeakData) do
+                ImGui.Text(ctx, string.format("#%d Track %d: %s", i, peak.trackNumber, peak.trackName))
+                ImGui.Text(ctx, string.format("Peak: %.1f dB | Suggestion: %s", peak.peakDB, peak.suggestion))
                 ImGui.Separator(ctx)
             end
         end
@@ -152,3 +172,4 @@ end
 
 -- Start script
 main()
+
