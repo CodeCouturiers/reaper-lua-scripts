@@ -8,7 +8,15 @@ local ctx = ImGui.CreateContext("Realtime RMS/Peak Levels Monitor", ImGui_Config
 local meterLength = 30 -- Length of the meter
 local isRunning = false -- Controls whether the monitoring is active
 local isPaused = false -- Controls whether monitoring is paused
-local progress = 0 -- Timeline progress
+local logData = {} -- Store peak and RMS logs for display
+
+-- Function to format seconds into HH:MM:SS
+local function formatTime(seconds)
+    local hours = math.floor(seconds / 3600)
+    local minutes = math.floor((seconds % 3600) / 60)
+    local secs = math.floor(seconds % 60)
+    return string.format("%02d:%02d:%02d", hours, minutes, secs)
+end
 
 -- Function to calculate RMS and peak values
 local function getTrackRMSAndPeak(track)
@@ -33,6 +41,35 @@ local function createMeter(peakDB)
     return string.rep("=", level) .. string.rep("-", meterLength - level)
 end
 
+-- Function to log data
+local function logTrackData()
+    logData = {} -- Clear previous logs if not paused
+    local numTracks = reaper.CountTracks(0)
+    for i = 0, numTracks - 1 do
+        local track = reaper.GetTrack(0, i)
+        local _, trackName = reaper.GetTrackName(track)
+        local trackNumber = reaper.GetMediaTrackInfo_Value(track, "IP_TRACKNUMBER")
+        local rmsDB, peakDB, crestFactor = getTrackRMSAndPeak(track)
+        local meter = createMeter(peakDB)
+
+        -- Warnings
+        local warning = ""
+        if rmsDB > -18 then warning = warning .. " [HOT RMS]" end
+        if peakDB > -6 then warning = warning .. " [HOT PEAK]" end
+
+        -- Save to log
+        table.insert(logData, {
+            trackNumber = trackNumber,
+            trackName = trackName,
+            rmsDB = rmsDB,
+            peakDB = peakDB,
+            crestFactor = crestFactor,
+            meter = meter,
+            warning = warning
+        })
+    end
+end
+
 -- Main script function
 local function main()
     -- Variable to track if the window is open
@@ -45,7 +82,7 @@ local function main()
         if ImGui.Button(ctx, "Start") then
             isRunning = true
             isPaused = false
-            progress = 0
+            logData = {} -- Clear logs on start
         end
         ImGui.SameLine(ctx)
         if ImGui.Button(ctx, "Pause") then
@@ -73,39 +110,33 @@ local function main()
             ImGui.Text(ctx, "Status: Stopped")
         end
 
+        -- Get playback position and format it as time
+        local playPosition = reaper.GetPlayPosition()
+        local formattedTime = formatTime(playPosition)
+
         -- Display timeline
-        ImGui.Text(ctx, "Timeline:")
-        progress = isRunning and not isPaused and (progress + 0.01) % 1 or progress
+        ImGui.Text(ctx, string.format("Timeline: %s (Current Position)", formattedTime))
+        local projectLength = reaper.GetProjectLength()
+        local progress = playPosition / projectLength
         ImGui.ProgressBar(ctx, progress, 1.0, 20)
 
-        -- Monitoring logic
+        -- Log data if running and not paused
         if isRunning and not isPaused then
-            local numTracks = reaper.CountTracks(0)
-            if numTracks == 0 then
-                ImGui.Text(ctx, "No tracks found.")
-            else
-                for i = 0, numTracks - 1 do
-                    local track = reaper.GetTrack(0, i)
-                    local _, trackName = reaper.GetTrackName(track)
-                    local trackNumber = reaper.GetMediaTrackInfo_Value(track, "IP_TRACKNUMBER")
-                    local rmsDB, peakDB, crestFactor = getTrackRMSAndPeak(track)
-                    local meter = createMeter(peakDB)
+            logTrackData()
+        end
 
-                    -- Warnings
-                    local warning = ""
-                    if rmsDB > -18 then warning = warning .. " [HOT RMS]" end
-                    if peakDB > -6 then warning = warning .. " [HOT PEAK]" end
-
-                    -- Display track info
-                    ImGui.Text(ctx, string.format("Track %d: %s", trackNumber, trackName))
-                    ImGui.Text(ctx, string.format("RMS: %.1f dB | Peak: %.1f dB | CF: %.1f dB%s", rmsDB, peakDB, crestFactor, warning))
-
-                    -- Display meters
-                    ImGui.Text(ctx, meter)
-                    ImGui.Separator(ctx)
-                end
+        -- Display logs
+        if #logData > 0 then
+            ImGui.Separator(ctx)
+            ImGui.Text(ctx, "Track Logs:")
+            for _, log in ipairs(logData) do
+                ImGui.Text(ctx, string.format("Track %d: %s", log.trackNumber, log.trackName))
+                ImGui.Text(ctx, string.format("RMS: %.1f dB | Peak: %.1f dB | CF: %.1f dB%s", log.rmsDB, log.peakDB, log.crestFactor, log.warning))
+                ImGui.Text(ctx, log.meter)
+                ImGui.Separator(ctx)
             end
         end
+
         ImGui.End(ctx)
     end
 
