@@ -541,6 +541,46 @@ function removeDuplicateSends(sourceTrack)
     end
 end
 
+function addTestVSTAndMIDI(trackRefs)
+    reaper.ShowConsoleMsg("\n=== Добавление тестовых VST и MIDI ===\n")
+    
+    -- VST и MIDI будем добавлять только на INST треки
+    for i = 1, 20 do  -- для первых 20 инструментов
+        local trackName = string.format("[INST %d]", i)
+        local track = trackRefs[trackName]
+        
+        if track then
+            -- Добавляем VST (используем ReaSynth как тестовый VST)
+            local vst_idx = reaper.TrackFX_AddByName(track, "ReaSynth", false, -1)
+            if vst_idx >= 0 then
+                reaper.ShowConsoleMsg(string.format("Добавлен ReaSynth на %s\n", trackName))
+                
+                -- Создаем MIDI item
+                local startTime = 0
+                local length = 4  -- 4 такта
+                local item = reaper.CreateNewMIDIItemInProj(track, startTime, startTime + length)
+                if item then
+                    -- Получаем MIDI take
+                    local take = reaper.GetActiveTake(item)
+                    if take then
+                        -- Добавляем MIDI ноту
+                        -- Параметры: такт 0, нота C3 (60), velocity 100, длительность 1 такт
+                        local noteStartPPQ = 0
+                        local noteLength = reaper.MIDI_GetPPQPosFromProjTime(take, 1)  -- 1 такт
+                        local note = 60 + i  -- Разные ноты для разных треков
+                        local velocity = 100
+                        
+                        reaper.MIDI_InsertNote(take, false, false, noteStartPPQ, noteLength, 0, note, velocity, false)
+                        reaper.MIDI_Sort(take)
+                        reaper.ShowConsoleMsg(string.format("Добавлена MIDI нота %d на %s\n", note, trackName))
+                    end
+                end
+            else
+                reaper.ShowConsoleMsg(string.format("ОШИБКА: Не удалось добавить ReaSynth на %s\n", trackName))
+            end
+        end
+    end
+end
 
 function createRoutingStructure()
     reaper.ShowConsoleMsg("\n=== Создание структуры маршрутизации ===\n")
@@ -597,7 +637,7 @@ function createRoutingStructure()
     -- Создаем ссылки на треки и применяем базовые настройки
     local trackRefs = {}
     for name, number in pairs(tracks) do
-        trackRefs[name] = getTrackByNumber(number)
+        trackRefs[name] = getTrackByNumber(number)	
         if not trackRefs[name] then
             reaper.ShowConsoleMsg(string.format("ОШИБКА: Не найден трек %s (номер %d)\n", name, number))
             return false, tracks
@@ -697,7 +737,9 @@ function createRoutingStructure()
     -- Группировка треков
     reaper.ShowConsoleMsg("\n=== Настройка групп ===\n")
     setupTrackGrouping(trackRefs)
-    
+        -- Добавляем VST и MIDI для тестирования
+    addTestVSTAndMIDI(trackRefs)
+
     reaper.ShowConsoleMsg("\n=== Структура маршрутизации создана успешно ===\n")
     return true, trackRefs
 end
