@@ -1,0 +1,181 @@
+desc: Equal Loudness Curve with Mix (104-Band)
+//author: Claude
+//tags: equalizer
+
+slider1:mix=50<0,100,1>Mix (%)
+
+@slider
+mix_norm = mix/100;
+
+@init
+// 104-band frequencies and gains - скорректированные уровни на основе ISO 226:2003
+freqs[0] = 20;     gains[0] = 12;     q[0] = 1.4;
+freqs[1] = 21;     gains[1] = 11.8;   q[1] = 1.4;
+freqs[2] = 22;     gains[2] = 11.6;   q[2] = 1.4;
+freqs[3] = 23;     gains[3] = 11.4;   q[3] = 1.4;
+freqs[4] = 24;     gains[4] = 11.2;   q[4] = 1.4;
+freqs[5] = 25;     gains[5] = 11;     q[5] = 1.4;
+freqs[6] = 26;     gains[6] = 10.8;   q[6] = 1.4;
+freqs[7] = 27;     gains[7] = 10.6;   q[7] = 1.4;
+freqs[8] = 28;     gains[8] = 10.4;   q[8] = 1.4;
+freqs[9] = 29;     gains[9] = 10.2;   q[9] = 1.4;
+freqs[10] = 30;    gains[10] = 10;    q[10] = 1.4;
+freqs[11] = 32;    gains[11] = 9.8;   q[11] = 1.4;
+freqs[12] = 34;    gains[12] = 9.6;   q[12] = 1.4;
+freqs[13] = 36;    gains[13] = 9.4;   q[13] = 1.4;
+freqs[14] = 38;    gains[14] = 9.2;   q[14] = 1.4;
+freqs[15] = 40;    gains[15] = 9.0;   q[15] = 1.4;
+freqs[16] = 43;    gains[16] = 8.8;   q[16] = 1.4;
+freqs[17] = 46;    gains[17] = 8.6;   q[17] = 1.4;
+freqs[18] = 49;    gains[18] = 8.4;   q[18] = 1.4;
+freqs[19] = 52;    gains[19] = 8.2;   q[19] = 1.4;
+freqs[20] = 55;    gains[20] = 8.0;   q[20] = 1.4;
+freqs[21] = 58;    gains[21] = 7.8;   q[21] = 1.4;
+freqs[22] = 61;    gains[22] = 7.6;   q[22] = 1.4;
+freqs[23] = 64;    gains[23] = 7.4;   q[23] = 1.4;
+freqs[24] = 67;    gains[24] = 7.2;   q[24] = 1.4;
+freqs[25] = 70;    gains[25] = 7.0;   q[25] = 1.4;
+freqs[26] = 75;    gains[26] = 6.8;   q[26] = 1.4;
+freqs[27] = 80;    gains[27] = 6.6;   q[27] = 1.4;
+freqs[28] = 85;    gains[28] = 6.4;   q[28] = 1.4;
+freqs[29] = 90;    gains[29] = 6.2;   q[29] = 1.4;
+freqs[30] = 95;    gains[30] = 6.0;   q[30] = 1.4;
+freqs[31] = 100;   gains[31] = 5.8;   q[31] = 1.4;
+freqs[32] = 110;   gains[32] = 5.6;   q[32] = 1.4;
+freqs[33] = 120;   gains[33] = 5.4;   q[33] = 1.4;
+freqs[34] = 130;   gains[34] = 5.2;   q[34] = 1.4;
+freqs[35] = 140;   gains[35] = 5.0;   q[35] = 1.4;
+freqs[36] = 150;   gains[36] = 4.8;   q[36] = 1.4;
+freqs[37] = 160;   gains[37] = 4.6;   q[37] = 1.4;
+freqs[38] = 170;   gains[38] = 4.4;   q[38] = 1.4;
+freqs[39] = 180;   gains[39] = 4.2;   q[39] = 1.4;
+freqs[40] = 190;   gains[40] = 4.0;   q[40] = 1.4;
+freqs[41] = 200;   gains[41] = 3.8;   q[41] = 1.4;
+freqs[42] = 220;   gains[42] = 3.6;   q[42] = 1.4;
+freqs[43] = 240;   gains[43] = 3.4;   q[43] = 1.4;
+freqs[44] = 260;   gains[44] = 3.2;   q[44] = 1.4;
+freqs[45] = 280;   gains[45] = 3.0;   q[45] = 1.4;
+freqs[46] = 300;   gains[46] = 2.8;   q[46] = 1.4;
+freqs[47] = 320;   gains[47] = 2.6;   q[47] = 1.4;
+freqs[48] = 340;   gains[48] = 2.4;   q[48] = 1.4;
+freqs[49] = 360;   gains[49] = 2.2;   q[49] = 1.4;
+freqs[50] = 380;   gains[50] = 2.0;   q[50] = 1.4;
+freqs[51] = 400;   gains[51] = 1.8;   q[51] = 1.4;
+freqs[52] = 430;   gains[52] = 1.6;   q[52] = 1.4;
+freqs[53] = 460;   gains[53] = 1.4;   q[53] = 1.4;
+freqs[54] = 490;   gains[54] = 1.2;   q[54] = 1.4;
+freqs[55] = 520;   gains[55] = 1.0;   q[55] = 1.4;
+freqs[56] = 550;   gains[56] = 0.8;   q[56] = 1.4;
+freqs[57] = 580;   gains[57] = 0.6;   q[57] = 1.4;
+freqs[58] = 610;   gains[58] = 0.4;   q[58] = 1.4;
+freqs[59] = 640;   gains[59] = 0.2;   q[59] = 1.4;
+freqs[60] = 670;   gains[60] = 0;     q[60] = 1.4;
+freqs[61] = 700;   gains[61] = -0.2;  q[61] = 1.4;
+freqs[62] = 750;   gains[62] = -0.4;  q[62] = 1.4;
+freqs[63] = 800;   gains[63] = -0.6;  q[63] = 1.4;
+freqs[64] = 850;   gains[64] = -0.8;  q[64] = 1.4;
+freqs[65] = 900;   gains[65] = -1.0;  q[65] = 1.4;
+freqs[66] = 950;   gains[66] = -1.2;  q[66] = 1.4;
+freqs[67] = 1000;  gains[67] = -1.4;  q[67] = 1.4;
+freqs[68] = 1100;  gains[68] = -1.6;  q[68] = 1.4;
+freqs[69] = 1200;  gains[69] = -1.8;  q[69] = 1.4;
+freqs[70] = 1300;  gains[70] = -2.0;  q[70] = 1.4;
+freqs[71] = 1400;  gains[71] = -2.0;  q[71] = 1.4;
+freqs[72] = 1500;  gains[72] = -2.0;  q[72] = 1.4;
+freqs[73] = 1600;  gains[73] = -1.8;  q[73] = 1.4;
+freqs[74] = 1700;  gains[74] = -1.6;  q[74] = 1.4;
+freqs[75] = 1800;  gains[75] = -1.4;  q[75] = 1.4;
+freqs[76] = 1900;  gains[76] = -1.2;  q[76] = 1.4;
+freqs[77] = 2000;  gains[77] = -1.0;  q[77] = 1.4;
+freqs[78] = 2200;  gains[78] = -0.8;  q[78] = 1.4;
+freqs[79] = 2400;  gains[79] = -0.6;  q[79] = 1.4;
+freqs[80] = 2600;  gains[80] = 0;     q[80] = 1.4;
+freqs[81] = 2800;  gains[81] = 0.5;   q[81] = 1.4;
+freqs[82] = 3000;  gains[82] = 1.0;   q[82] = 1.4;
+freqs[83] = 3300;  gains[83] = 1.5;   q[83] = 1.4;
+freqs[84] = 3600;  gains[84] = 2.0;   q[84] = 1.4;
+freqs[85] = 3900;  gains[85] = 2.5;   q[85] = 1.4;
+freqs[86] = 4200;  gains[86] = 3.0;   q[86] = 1.4;
+freqs[87] = 4500;  gains[87] = 3.5;   q[87] = 1.4;
+freqs[88] = 4800;  gains[88] = 4.0;   q[88] = 1.4;
+freqs[89] = 5100;  gains[89] = 4.5;   q[89] = 1.4;
+freqs[90] = 5400;  gains[90] = 5.0;   q[90] = 1.4;
+freqs[91] = 5700;  gains[91] = 5.5;   q[91] = 1.4;
+freqs[92] = 6000;  gains[92] = 6.0;   q[92] = 1.4;
+freqs[93] = 7000;  gains[93] = 6.5;   q[93] = 1.4;
+freqs[94] = 8000;  gains[94] = 7.0;   q[94] = 1.4;
+freqs[95] = 9000;  gains[95] = 7.5;   q[95] = 1.4;
+freqs[96] = 10000; gains[96] = 8.0;   q[96] = 1.4;
+freqs[97] = 12000; gains[97] = 8.5;   q[97] = 1.4;
+freqs[98] = 14000; gains[98] = 9.0;   q[98] = 1.4;
+freqs[99] = 16000; gains[99] = 9.5;   q[99] = 1.4;
+freqs[100] = 18000; gains[100] = 10;  q[100] = 1.4;
+freqs[101] = 20000; gains[101] = 10.5; q[101] = 1.4;
+freqs[102] = 21000; gains[102] = 11;  q[102] = 1.4;
+freqs[103] = 22050; gains[103] = 11.5; q[103] = 1.4;
+
+
+band_count = 104;
+
+// Initialize filter states
+memset(x1l, 0, band_count);
+memset(x2l, 0, band_count);
+memset(y1l, 0, band_count);
+memset(y2l, 0, band_count);
+memset(x1r, 0, band_count);
+memset(x2r, 0, band_count);
+memset(y1r, 0, band_count);
+memset(y2r, 0, band_count);
+
+function calc_eq_coeffs(freq, q, gain_db)
+local(A, w0, alpha, b0, b1, b2, a0, a1, a2)
+(
+ A = pow(10, gain_db/40);
+ w0 = 2 * $pi * freq/srate;
+ alpha = sin(w0)/(2*q);
+
+ b0 = 1 + alpha*A;
+ b1 = -2*cos(w0);
+ b2 = 1 - alpha*A;
+ a0 = 1 + alpha/A;
+ a1 = -2*cos(w0);
+ a2 = 1 - alpha/A;
+
+ b0 /= a0;
+ b1 /= a0;
+ b2 /= a0;
+ a1 /= a0;
+ a2 /= a0;
+);
+
+@sample
+dry_l = spl0;
+dry_r = spl1;
+wet_l = spl0;
+wet_r = spl1;
+
+i = 0;
+loop(band_count,
+ calc_eq_coeffs(freqs[i], q[i], gains[i] * mix_norm);
+ 
+ // Left channel
+ outl = b0*wet_l + b1*x1l[i] + b2*x2l[i] - a1*y1l[i] - a2*y2l[i];
+ x2l[i] = x1l[i];
+ x1l[i] = wet_l;
+ y2l[i] = y1l[i];
+ y1l[i] = outl;
+ wet_l = outl;
+ 
+ // Right channel
+ outr = b0*wet_r + b1*x1r[i] + b2*x2r[i] - a1*y1r[i] - a2*y2r[i];
+ x2r[i] = x1r[i];
+ x1r[i] = wet_r;
+ y2r[i] = y1r[i];
+ y1r[i] = outr;
+ wet_r = outr;
+ 
+ i += 1;
+);
+
+spl0 = dry_l * (1-mix_norm) + wet_l * mix_norm;
+spl1 = dry_r * (1-mix_norm) + wet_r * mix_norm;
