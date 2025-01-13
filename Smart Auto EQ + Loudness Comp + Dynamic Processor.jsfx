@@ -1,0 +1,213 @@
+desc: Smart Auto EQ + Loudness Comp + Dynamic Processor
+//tags: processing, equalizer, compressor
+//author: Custom Processing Chain
+
+slider1:0<0,100,1>Mix (%)
+slider2:0<0,100,1>Auto EQ Amount (%)
+slider3:0<0,100,1>Smart Comp Amount (%)
+slider4:-18<-60,0,1>Threshold (dB)
+slider5:1<1,20,0.1>Dynamic Ratio
+
+@init
+// FFT анализа
+FFT_SIZE = 4096;
+fft_buffer = 0;
+anal_buffer = FFT_SIZE*2;
+
+freemem = anal_buffer + FFT_SIZE;
+window.table = freemem;
+freemem += FFT_SIZE;
+
+i = 0;
+loop(FFT_SIZE,
+ window.table[i] = 0.5 - cos(2.0*$pi*i/FFT_SIZE)*0.5;
+ i += 1
+);
+
+// Частотные банды
+freq_bands = 8;
+band_buf = freemem;
+freemem += freq_bands;
+
+// Правильная инициализация массивов
+freq_points.0 = 20;
+freq_points.1 = 100;
+freq_points.2 = 250;
+freq_points.3 = 1000;
+freq_points.4 = 2500;
+freq_points.5 = 5000;
+freq_points.6 = 10000;
+freq_points.7 = 20000;
+
+target_curve.0 = -2;
+target_curve.1 = -1;
+target_curve.2 = 0;
+target_curve.3 = 1;
+target_curve.4 = 2;
+target_curve.5 = 1;
+target_curve.6 = 0;
+target_curve.7 = -1;
+
+// Компрессор
+att = 0.003; // 3ms attack
+rel = 0.1;   // 100ms release
+env = 0;
+prev_env = 0;
+knee = 6;    // Мягкое колено 6dB
+
+// RMS детекция
+rms_size = srate * 0.03; // 30ms окно
+rms_buf = freemem;
+freemem += rms_size;
+rms_pos = 0;
+rms_sum = 0;
+
+@slider
+mix = slider1/100;
+auto_amount = slider2/100;
+comp_amount = slider3/100;
+threshold = pow(10, slider4/20);
+ratio = slider5;
+
+// Коэффициенты компенсации
+low_comp = 1 + (1-mix) * 0.8;
+midlow_comp = 1 + (1-mix) * 0.3;
+midhigh_comp = 1 - (1-mix) * 0.2;
+high_comp = 1 + (1-mix) * 0.4;
+
+// Компрессор
+att_coef = exp(-1/(srate*att));
+rel_coef = exp(-1/(srate*rel));
+
+@block
+memset(band_buf, 0, freq_bands);
+
+@sample
+input = (spl0 + spl1) * 0.5;
+
+// RMS детекция
+rms_sum -= rms_buf[rms_pos];
+rms_buf[rms_pos] = input * input;
+rms_sum += rms_buf[rms_pos];
+rms_pos = (rms_pos + 1) % rms_size;
+rms = sqrt(rms_sum/rms_size);
+
+// FFT анализ
+fft_pos = 0;
+fft_buffer[fft_pos] = input;
+fft_pos += 1;
+
+fft_pos >= FFT_SIZE ? (
+ i = 0;
+ loop(FFT_SIZE,
+   anal_buffer[i*2] = fft_buffer[i] * window.table[i];
+   anal_buffer[i*2+1] = 0;
+   i += 1;
+ );
+ 
+ fft(anal_buffer, FFT_SIZE);
+ 
+ i = 0;
+ loop(freq_bands,
+   freq = freq_points[i];
+   bin = floor(freq * FFT_SIZE / srate);
+   magnitude = sqrt(sqr(anal_buffer[bin*2]) + sqr(anal_buffer[bin*2+1]));
+   band_buf[i] = max(band_buf[i], magnitude);
+   i += 1;
+ );
+ 
+ fft_pos = 0;
+);
+
+// Умная эквализация
+i = 0;
+proc = input;
+loop(freq_bands,
+ freq = freq_points[i];
+ target = target_curve[i];
+ current = band_buf[i];
+ 
+ diff = target - current;
+ gain = diff * auto_amount;
+ 
+ freq_gain = exp(-abs(log(freq/1000)));
+ proc += input * gain * freq_gain;
+ 
+ i += 1;
+);
+
+// Умная компрессия
+level = abs(proc);
+env = level > prev_env ? 
+     level * (1 - att_coef) + prev_env * att_coef : 
+     level * (1 - rel_coef) + prev_env * rel_coef;
+prev_env = env;
+
+// Мягкое колено
+over = env - threshold;
+over = max(over, 0);
+soft_knee = (over + knee) * 0.5;
+
+// Расчет компрессии
+comp_gain = over > 0 ? 
+          -(over/(ratio + (1-comp_amount))) : 
+          0;
+
+// Применение компрессии
+proc = proc * pow(10, comp_gain/20);
+
+// Компенсация громкости
+proc = proc * (
+ freq < 200 ? low_comp :
+ freq < 1000 ? midlow_comp :
+ freq < 4000 ? midhigh_comp : 
+ high_comp
+);
+
+// Финальный микс
+output = input * (1-mix) + proc * mix;
+
+// Лимитер безопасности
+output = min(max(output, -1), 1);
+
+spl0 = output;
+spl1 = output;
+
+@gfx 400 400
+gfx_clear = 0;
+gfx_r = 0; gfx_g = 0.5; gfx_b = 1;
+
+// Визуализация EQ кривой
+i = 0;
+gfx_x = 0; gfx_y = 150;
+while (i < gfx_w) (
+ freq = 20*pow(20000/20, i/gfx_w);
+ 
+ correction = 0;
+ j = 0;
+ loop(freq_bands,
+   freq_point = freq_points[j];
+   target = target_curve[j];
+   
+   dist = abs(log(freq/freq_point));
+   weight = exp(-dist*2);
+   correction += target * weight * auto_amount;
+   
+   j += 1;
+ );
+ 
+ correction += (
+   freq < 200 ? log(low_comp) :
+   freq < 1000 ? log(midlow_comp) :
+   freq < 4000 ? log(midhigh_comp) :
+   log(high_comp)
+ ) * mix;
+ 
+ gfx_lineto(i, 150 - correction * 20);
+ i += 1;
+);
+
+// Визуализация компрессии
+gfx_r = 1; gfx_g = 0.5; gfx_b = 0;
+gfx_x = 0; gfx_y = 300;
+gfx_lineto(gfx_w * (env/threshold), 300);
