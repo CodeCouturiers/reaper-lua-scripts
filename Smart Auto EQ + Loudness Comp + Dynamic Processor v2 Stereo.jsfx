@@ -1,0 +1,394 @@
+desc: Smart Auto EQ + Loudness Comp + Dynamic Processor v2 Stereo
+//tags: processing, equalizer, compressor, stereo
+//author: Custom Processing Chain
+
+slider1:0<0,100,1>Mix (%)
+slider2:0<0,100,1>Auto EQ Amount (%)
+slider3:0<0,100,1>Smart Comp Amount (%)
+slider4:-18<-60,0,1>Threshold (dB)
+slider5:1<1,20,0.1>Dynamic Ratio
+slider6:0<-100,100,1>Stereo Width (%)
+
+@init
+// Улучшенный FFT анализ для стерео
+FFT_SIZE = 8192;
+OVERLAP = 4;
+fft_buffer_l = 0;
+fft_buffer_r = FFT_SIZE;
+anal_buffer_l = FFT_SIZE*2;
+anal_buffer_r = anal_buffer_l + FFT_SIZE*2;
+
+freemem = anal_buffer_r + FFT_SIZE*2;
+window.table = freemem;
+freemem += FFT_SIZE;
+
+i = 0;
+loop(FFT_SIZE,
+ window.table[i] = 0.5 - cos(2.0*$pi*i/FFT_SIZE)*0.5;
+ i += 1
+);
+
+// Многополосное разделение
+BANDS = 12;
+band_buf_l = freemem;
+band_buf_r = band_buf_l + BANDS;
+band_gains_l = band_buf_r + BANDS;
+band_gains_r = band_gains_l + BANDS;
+freemem = band_gains_r + BANDS;
+
+freq_points.0 = 20;
+freq_points.1 = 50;
+freq_points.2 = 100;
+freq_points.3 = 250;
+freq_points.4 = 500;
+freq_points.5 = 1000;
+freq_points.6 = 2000;
+freq_points.7 = 4000;
+freq_points.8 = 6000;
+freq_points.9 = 8000;
+freq_points.10 = 12000;
+freq_points.11 = 20000;
+
+target_curve.0 = -3;
+target_curve.1 = -1.5;
+target_curve.2 = -0.5;
+target_curve.3 = 0;
+target_curve.4 = 0.5;
+target_curve.5 = 1;
+target_curve.6 = 1.5;
+target_curve.7 = 1;
+target_curve.8 = 0.5;
+target_curve.9 = 0;
+target_curve.10 = -0.5;
+target_curve.11 = -1;
+
+// Динамический EQ
+dynEQ.att = 0.001;
+dynEQ.rel = 0.050;
+dynEQ.threshold = 0.7;
+dynEQ.ratio = 2;
+
+// Компрессор для каждого канала
+comp_l.lookahead = 0.005;
+comp_r.lookahead = 0.005;
+comp.program_dependent = 1;
+comp.auto_gain = 1;
+prev_peak_l = prev_peak_r = 0;
+prev_env_l = prev_env_r = 0;
+
+// RMS детекция stereo
+rms_size = srate * 0.03;
+rms_buf_l = freemem;
+rms_buf_r = rms_buf_l + rms_size;
+freemem = rms_buf_r + rms_size;
+rms_pos = 0;
+rms_sum_l = rms_sum_r = 0;
+
+// Stereo imaging
+mid = side = 0;
+
+@slider
+mix = slider1/100;
+auto_amount = slider2/100;
+comp_amount = slider3/100;
+threshold = pow(10, slider4/20);
+ratio = slider5;
+stereo_width = 1 + (slider6/100);
+
+@block
+memset(band_buf_l, 0, BANDS);
+memset(band_buf_r, 0, BANDS);
+
+@sample
+// Stereo to Mid/Side
+mid = (spl0 + spl1) * 0.5;
+side = (spl0 - spl1) * 0.5 * stereo_width;
+
+// Анализ для каждого канала
+input_rms_l = sqrt(spl0 * spl0);
+input_rms_r = sqrt(spl1 * spl1);
+input_peak_l = abs(spl0);
+input_peak_r = abs(spl1);
+
+// RMS обновление stereo
+rms_sum_l -= rms_buf_l[rms_pos];
+rms_sum_r -= rms_buf_r[rms_pos];
+rms_buf_l[rms_pos] = spl0 * spl0;
+rms_buf_r[rms_pos] = spl1 * spl1;
+rms_sum_l += rms_buf_l[rms_pos];
+rms_sum_r += rms_buf_r[rms_pos];
+rms_pos = (rms_pos + 1) % rms_size;
+rms_l = sqrt(rms_sum_l/rms_size);
+rms_r = sqrt(rms_sum_r/rms_size);
+
+// FFT анализ для обоих каналов
+fft_pos = 0;
+fft_buffer_l[fft_pos] = spl0;
+fft_buffer_r[fft_pos] = spl1;
+fft_pos += 1;
+
+fft_pos >= FFT_SIZE ? (
+ i = 0;
+ loop(FFT_SIZE,
+   anal_buffer_l[i*2] = fft_buffer_l[i] * window.table[i];
+   anal_buffer_r[i*2] = fft_buffer_r[i] * window.table[i];
+   anal_buffer_l[i*2+1] = anal_buffer_r[i*2+1] = 0;
+   i += 1;
+ );
+ 
+ fft(anal_buffer_l, FFT_SIZE);
+ fft(anal_buffer_r, FFT_SIZE);
+ 
+ i = 0;
+ loop(BANDS,
+   freq = freq_points[i];
+   bin = floor(freq * FFT_SIZE / srate);
+   magnitude_l = sqrt(sqr(anal_buffer_l[bin*2]) + sqr(anal_buffer_l[bin*2+1]));
+   magnitude_r = sqrt(sqr(anal_buffer_r[bin*2]) + sqr(anal_buffer_r[bin*2+1]));
+   band_buf_l[i] = max(band_buf_l[i], magnitude_l);
+   band_buf_r[i] = max(band_buf_r[i], magnitude_r);
+   i += 1;
+ );
+ 
+ fft_pos = 0;
+);
+
+// Многополосная обработка stereo
+proc_l = spl0;
+proc_r = spl1;
+
+i = 0;
+loop(BANDS,
+ // Левый канал
+ band_energy_l = band_buf_l[i];
+ target = target_curve[i];
+ 
+ band_energy_l > dynEQ.threshold ? (
+   compensation = ((band_energy_l - dynEQ.threshold) * dynEQ.ratio);
+   target -= compensation;
+ );
+ 
+ curr_gain_l = band_gains_l[i];
+ target_gain_l = target * auto_amount;
+ band_gains_l[i] = curr_gain_l + (target_gain_l - curr_gain_l) * 0.1;
+ 
+ // Правый канал
+ band_energy_r = band_buf_r[i];
+ 
+ band_energy_r > dynEQ.threshold ? (
+   compensation = ((band_energy_r - dynEQ.threshold) * dynEQ.ratio);
+   target -= compensation;
+ );
+ 
+ curr_gain_r = band_gains_r[i];
+ target_gain_r = target * auto_amount;
+ band_gains_r[i] = curr_gain_r + (target_gain_r - curr_gain_r) * 0.1;
+ 
+ freq = freq_points[i];
+ freq_gain = exp(-abs(log(freq/1000)));
+ 
+ proc_l += spl0 * band_gains_l[i] * freq_gain;
+ proc_r += spl1 * band_gains_r[i] * freq_gain;
+ 
+ i += 1;
+);
+
+// Стерео компрессия
+program_loudness_l = (input_rms_l + input_peak_l * 0.5) * 0.5;
+program_loudness_r = (input_rms_r + input_peak_r * 0.5) * 0.5;
+
+comp_threshold_l = threshold * (1 + (1-program_loudness_l) * 0.3);
+comp_threshold_r = threshold * (1 + (1-program_loudness_r) * 0.3);
+
+comp_ratio_l = ratio * (1 + program_loudness_l * 0.5);
+comp_ratio_r = ratio * (1 + program_loudness_r * 0.5);
+
+transient_detection_l = abs(input_peak_l - prev_peak_l);
+transient_detection_r = abs(input_peak_r - prev_peak_r);
+
+comp_attack_l = comp_l.lookahead + (transient_detection_l * 0.01);
+comp_attack_r = comp_r.lookahead + (transient_detection_r * 0.01);
+
+comp_release_l = 0.050 + (program_loudness_l * 0.1);
+comp_release_r = 0.050 + (program_loudness_r * 0.1);
+
+// Огибающая компрессора L
+level_l = abs(proc_l);
+env_l = level_l > prev_env_l ? 
+     level_l * (1 - comp_attack_l) + prev_env_l * comp_attack_l : 
+     level_l * (1 - comp_release_l) + prev_env_l * comp_release_l;
+prev_env_l = env_l;
+
+// Огибающая компрессора R
+level_r = abs(proc_r);
+env_r = level_r > prev_env_r ? 
+     level_r * (1 - comp_attack_r) + prev_env_r * comp_attack_r : 
+     level_r * (1 - comp_release_r) + prev_env_r * comp_release_r;
+prev_env_r = env_r;
+
+// Компрессия L
+over_l = env_l - comp_threshold_l;
+over_l = max(over_l, 0);
+knee = 6;
+soft_knee_l = (over_l + knee) * 0.5;
+
+comp_gain_l = over_l > 0 ? 
+          -(over_l/(comp_ratio_l + (1-comp_amount))) : 
+          0;
+
+// Компрессия R
+over_r = env_r - comp_threshold_r;
+over_r = max(over_r, 0);
+soft_knee_r = (over_r + knee) * 0.5;
+
+comp_gain_r = over_r > 0 ? 
+          -(over_r/(comp_ratio_r + (1-comp_amount))) : 
+          0;
+
+proc_l = proc_l * pow(10, comp_gain_l/20);
+proc_r = proc_r * pow(10, comp_gain_r/20);
+
+// Mid/Side to Stereo с защитой
+mid = (proc_l + proc_r) * 0.5;
+side = (proc_l - proc_r) * 0.5 * stereo_width;
+
+// Ограничение side для предотвращения перемодуляции
+side_limit = sqrt(1 - mid*mid);
+side = max(min(side, side_limit), -side_limit);
+
+output_l = mid + side;
+output_r = mid - side;
+
+// Финальный микс
+spl0 = spl0 * (1-mix) + output_l * mix;
+spl1 = spl1 * (1-mix) + output_r * mix;
+
+// Лимитер
+spl0 = min(max(spl0, -1), 1);
+spl1 = min(max(spl1, -1), 1);
+
+prev_peak_l = input_peak_l;
+prev_peak_r = input_peak_r;
+
+@gfx 600 400
+gfx_clear = 0x000000;
+gfx_setfont(1, "Arial", 14);
+
+// Фон для спектра
+gfx_r = 0.1; gfx_g = 0.1; gfx_b = 0.1; gfx_a = 1;
+gfx_rect(20, 20, 560, 200);
+
+// Сетка частот
+gfx_r = 0.3; gfx_g = 0.3; gfx_b = 0.3;
+// Правильная инициализация частот для сетки
+freqs.0 = 20;
+freqs.1 = 50;
+freqs.2 = 100;
+freqs.3 = 200;
+freqs.4 = 500;
+freqs.5 = 1000;
+freqs.6 = 2000;
+freqs.7 = 5000;
+freqs.8 = 10000;
+freqs.9 = 20000;
+i = 0;
+loop(10,
+ freq = freqs[i];
+ x = 20 + log(freq/20)/log(20000/20) * 560;
+ gfx_line(x, 20, x, 220);
+ gfx_x = x-15; gfx_y = 225;
+ gfx_drawnumber(freq, 0);
+ i += 1;
+);
+
+// EQ кривая L
+gfx_r = 0; gfx_g = 0.7; gfx_b = 1; gfx_a = 0.8;
+i = 0;
+gfx_x = 20;
+gfx_y = 120;
+while (i < 560) (
+ freq = 20*pow(20000/20, i/560);
+ 
+ correction = 0;
+ j = 0;
+ loop(BANDS,
+   freq_point = freq_points[j];
+   target = target_curve[j] * band_gains_l[j];
+   
+   dist = abs(log(freq/freq_point));
+   weight = exp(-dist*2);
+   correction += target * weight * auto_amount;
+   
+   j += 1;
+ );
+ 
+ gfx_lineto(20 + i, 120 - correction * 30);
+ i += 1;
+);
+
+// EQ кривая R
+gfx_r = 1; gfx_g = 0.3; gfx_b = 0.3; gfx_a = 0.8;
+i = 0;
+gfx_x = 20;
+gfx_y = 120;
+while (i < 560) (
+ freq = 20*pow(20000/20, i/560);
+ 
+ correction = 0;
+ j = 0;
+ loop(BANDS,
+   freq_point = freq_points[j];
+   target = target_curve[j] * band_gains_r[j];
+   
+   dist = abs(log(freq/freq_point));
+   weight = exp(-dist*2);
+   correction += target * weight * auto_amount;
+   
+   j += 1;
+ );
+ 
+ gfx_lineto(20 + i, 120 - correction * 30);
+ i += 1;
+);
+
+// Фон для компрессии
+gfx_r = 0.1; gfx_g = 0.1; gfx_b = 0.1; gfx_a = 1;
+gfx_rect(20, 280, 560, 100);
+
+// Компрессия L/R
+gfx_r = 0; gfx_g = 0.7; gfx_b = 1; gfx_a = 0.8;
+gfx_line(20, 330, 580, 330); // Линия порога L
+
+// Индикатор компрессии L
+gfx_r = 0; gfx_g = 0.7; gfx_b = 1; gfx_a = 0.8;
+gfx_rect(20, 320, 560 * (env_l/threshold), 10);
+
+// Компрессия R
+gfx_r = 1; gfx_g = 0.3; gfx_b = 0.3; gfx_a = 0.8;
+gfx_rect(20, 340, 560 * (env_r/threshold), 10);
+
+// Текст и значения
+gfx_r = 1; gfx_g = 1; gfx_b = 1; gfx_a = 0.9;
+gfx_x = 20; gfx_y = 5;
+gfx_drawstr("Frequency Response");
+
+gfx_x = 20; gfx_y = 265;
+gfx_drawstr("Compression");
+
+// Уровни
+gfx_x = 500; gfx_y = 320;
+gfx_drawstr(sprintf(#, "L: %.1f dB", 20*log10(env_l)));
+gfx_x = 500; gfx_y = 340;
+gfx_drawstr(sprintf(#, "R: %.1f dB", 20*log10(env_r)));
+
+// Stereo width индикатор
+gfx_r = 0.5; gfx_g = 0.5; gfx_b = 1; gfx_a = 0.8;
+gfx_rect(520, 20, 40, 100 * stereo_width);
+
+gfx_x = 520; gfx_y = 5;
+gfx_drawstr("Width");
+
+// RMS meters
+gfx_r = 0.3; gfx_g = 1; gfx_b = 0.3; gfx_a = 0.8;
+gfx_rect(580, 20, 10, 180 * (1-rms_l));
+gfx_rect(590, 20, 10, 180 * (1-rms_r));
