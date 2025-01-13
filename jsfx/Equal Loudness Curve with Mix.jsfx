@@ -1,0 +1,83 @@
+desc: Equal Loudness Curve with Mix
+//author: Claude
+//tags: equalizer
+
+slider1:mix=50<0,100,1>Mix (%)
+
+@slider
+mix_norm = mix/100;
+
+@init
+// Initialize 7 bands based on the image
+freqs[0] = 20;    gains[0] = -3;   q[0] = 0.7;   // Sub cut
+freqs[1] = 90;    gains[1] = 4;    q[1] = 0.7;   // Low boost
+freqs[2] = 300;   gains[2] = -2;   q[2] = 1.0;   // Low-mid dip
+freqs[3] = 1000;  gains[3] = -3;   q[3] = 1.0;   // Mid dip
+freqs[4] = 2500;  gains[4] = -6;   q[4] = 1.2;   // Mid-high cut
+freqs[5] = 5000;  gains[5] = -3;   q[5] = 1.0;   // High dip
+freqs[6] = 10000; gains[6] = 2;    q[6] = 0.8;   // High shelf
+
+band_count = 7;
+
+// Initialize filter states
+memset(x1l, 0, band_count);
+memset(x2l, 0, band_count);
+memset(y1l, 0, band_count);
+memset(y2l, 0, band_count);
+memset(x1r, 0, band_count);
+memset(x2r, 0, band_count);
+memset(y1r, 0, band_count);
+memset(y2r, 0, band_count);
+
+function calc_eq_coeffs(freq, q, gain_db)
+local(A, w0, alpha, b0, b1, b2, a0, a1, a2)
+(
+  A = pow(10, gain_db/40);
+  w0 = 2 * $pi * freq/srate;
+  alpha = sin(w0)/(2*q);
+
+  b0 = 1 + alpha*A;
+  b1 = -2*cos(w0);
+  b2 = 1 - alpha*A;
+  a0 = 1 + alpha/A;
+  a1 = -2*cos(w0);
+  a2 = 1 - alpha/A;
+
+  b0 /= a0;
+  b1 /= a0;
+  b2 /= a0;
+  a1 /= a0;
+  a2 /= a0;
+);
+
+@sample
+dry_l = spl0;
+dry_r = spl1;
+wet_l = spl0;
+wet_r = spl1;
+
+i = 0;
+loop(band_count,
+  calc_eq_coeffs(freqs[i], q[i], gains[i] * mix_norm);
+  
+  // Left channel
+  outl = b0*wet_l + b1*x1l[i] + b2*x2l[i] - a1*y1l[i] - a2*y2l[i];
+  x2l[i] = x1l[i];
+  x1l[i] = wet_l;
+  y2l[i] = y1l[i];
+  y1l[i] = outl;
+  wet_l = outl;
+  
+  // Right channel
+  outr = b0*wet_r + b1*x1r[i] + b2*x2r[i] - a1*y1r[i] - a2*y2r[i];
+  x2r[i] = x1r[i];
+  x1r[i] = wet_r;
+  y2r[i] = y1r[i];
+  y1r[i] = outr;
+  wet_r = outr;
+  
+  i += 1;
+);
+
+spl0 = dry_l * (1-mix_norm) + wet_l * mix_norm;
+spl1 = dry_r * (1-mix_norm) + wet_r * mix_norm;
