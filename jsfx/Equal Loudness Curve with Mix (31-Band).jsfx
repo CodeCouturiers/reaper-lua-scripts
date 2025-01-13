@@ -1,0 +1,107 @@
+desc: Equal Loudness Curve with Mix (31-Band)
+//author: Claude
+//tags: equalizer
+
+slider1:mix=50<0,100,1>Mix (%)
+
+@slider
+mix_norm = mix/100;
+
+@init
+// Standard 31-band frequencies (Hz)
+freqs[0] = 20;    gains[0] = -10;   q[0] = 1.4;
+freqs[1] = 25;    gains[1] = -9;    q[1] = 1.4;
+freqs[2] = 31.5;  gains[2] = -8;    q[2] = 1.4;
+freqs[3] = 40;    gains[3] = -7;    q[3] = 1.4;
+freqs[4] = 50;    gains[4] = -6;    q[4] = 1.4;
+freqs[5] = 63;    gains[5] = -5;    q[5] = 1.4;
+freqs[6] = 80;    gains[6] = -4;    q[6] = 1.4;
+freqs[7] = 100;   gains[7] = -3;    q[7] = 1.4;
+freqs[8] = 125;   gains[8] = -2;    q[8] = 1.4;
+freqs[9] = 160;   gains[9] = -1;    q[9] = 1.4;
+freqs[10] = 200;  gains[10] = 0;    q[10] = 1.4;
+freqs[11] = 250;  gains[11] = 0.5;  q[11] = 1.4;
+freqs[12] = 315;  gains[12] = 1;    q[12] = 1.4;
+freqs[13] = 400;  gains[13] = 1.5;  q[13] = 1.4;
+freqs[14] = 500;  gains[14] = 2;    q[14] = 1.4;
+freqs[15] = 630;  gains[15] = 2.5;  q[15] = 1.4;
+freqs[16] = 800;  gains[16] = 3;    q[16] = 1.4;
+freqs[17] = 1000; gains[17] = 2.5;  q[17] = 1.4;
+freqs[18] = 1250; gains[18] = 2;    q[18] = 1.4;
+freqs[19] = 1600; gains[19] = 1.5;  q[19] = 1.4;
+freqs[20] = 2000; gains[20] = 1;    q[20] = 1.4;
+freqs[21] = 2500; gains[21] = 0;    q[21] = 1.4;
+freqs[22] = 3150; gains[22] = -1;   q[22] = 1.4;
+freqs[23] = 4000; gains[23] = -2;   q[23] = 1.4;
+freqs[24] = 5000; gains[24] = -3;   q[24] = 1.4;
+freqs[25] = 6300; gains[25] = -4;   q[25] = 1.4;
+freqs[26] = 8000; gains[26] = -5;   q[26] = 1.4;
+freqs[27] = 10000; gains[27] = -6;  q[27] = 1.4;
+freqs[28] = 12500; gains[28] = -7;  q[28] = 1.4;
+freqs[29] = 16000; gains[29] = -8;  q[29] = 1.4;
+freqs[30] = 20000; gains[30] = -9;  q[30] = 1.4;
+
+band_count = 31;
+
+// Initialize filter states
+memset(x1l, 0, band_count);
+memset(x2l, 0, band_count);
+memset(y1l, 0, band_count);
+memset(y2l, 0, band_count);
+memset(x1r, 0, band_count);
+memset(x2r, 0, band_count);
+memset(y1r, 0, band_count);
+memset(y2r, 0, band_count);
+
+function calc_eq_coeffs(freq, q, gain_db)
+local(A, w0, alpha, b0, b1, b2, a0, a1, a2)
+(
+  A = pow(10, gain_db/40);
+  w0 = 2 * $pi * freq/srate;
+  alpha = sin(w0)/(2*q);
+
+  b0 = 1 + alpha*A;
+  b1 = -2*cos(w0);
+  b2 = 1 - alpha*A;
+  a0 = 1 + alpha/A;
+  a1 = -2*cos(w0);
+  a2 = 1 - alpha/A;
+
+  b0 /= a0;
+  b1 /= a0;
+  b2 /= a0;
+  a1 /= a0;
+  a2 /= a0;
+);
+
+@sample
+dry_l = spl0;
+dry_r = spl1;
+wet_l = spl0;
+wet_r = spl1;
+
+i = 0;
+loop(band_count,
+  calc_eq_coeffs(freqs[i], q[i], gains[i] * mix_norm);
+  
+  // Left channel
+  outl = b0*wet_l + b1*x1l[i] + b2*x2l[i] - a1*y1l[i] - a2*y2l[i];
+  x2l[i] = x1l[i];
+  x1l[i] = wet_l;
+  y2l[i] = y1l[i];
+  y1l[i] = outl;
+  wet_l = outl;
+  
+  // Right channel
+  outr = b0*wet_r + b1*x1r[i] + b2*x2r[i] - a1*y1r[i] - a2*y2r[i];
+  x2r[i] = x1r[i];
+  x1r[i] = wet_r;
+  y2r[i] = y1r[i];
+  y1r[i] = outr;
+  wet_r = outr;
+  
+  i += 1;
+);
+
+spl0 = dry_l * (1-mix_norm) + wet_l * mix_norm;
+spl1 = dry_r * (1-mix_norm) + wet_r * mix_norm;
